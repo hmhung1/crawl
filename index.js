@@ -3,20 +3,23 @@ const fs = require('fs');
 const path = require('path');
 const FormData = require('form-data');
 
-// Hàm tải video lên Catbox
 async function uploadToCatbox(filePath) {
-  const formData = new FormData();
-  formData.append('reqtype', 'fileupload');
-  formData.append('fileToUpload', fs.createReadStream(filePath));
+  try {
+    const formData = new FormData();
+    formData.append('reqtype', 'fileupload');
+    formData.append('fileToUpload', fs.createReadStream(filePath));
 
-  const { data } = await axios.post('https://catbox.moe/user/api.php', formData, {
-    headers: formData.getHeaders(),
-  });
+    const { data } = await axios.post('https://catbox.moe/user/api.php', formData, {
+      headers: formData.getHeaders(),
+    });
 
-  return data; // Trả về link sau khi upload
+    return data; 
+  } catch (error) {
+    console.error('Error uploading to Catbox:', error.response?.data || error.message);
+    throw new Error('Error uploading to Catbox');
+  }
 }
 
-// Hàm lấy video TikTok từ API Tikwm
 async function getTikTokVideo(url) {
   try {
     const response = await axios({
@@ -26,59 +29,51 @@ async function getTikTokVideo(url) {
       headers: {
         'content-type': 'application/json',
       },
+      timeout: 30000,
     });
 
-    // Trả về video URL từ kết quả API
     return response.data.data.play;
   } catch (error) {
-    throw new Error('Error fetching TikTok video:', error);
+    console.error('Error fetching TikTok video:', error.response?.data || error.message);
+    throw new Error('Error fetching TikTok video');
   }
 }
 
-// Hàm chính xử lý toàn bộ quá trình
 async function processTikTokLinks() {
   try {
-    // Đọc tất cả các dòng trong file link.txt
     const links = fs.readFileSync('link.txt', 'utf-8').split('\n').filter(Boolean);
     let result = [];
 
     for (const link of links) {
       console.log(`Processing: ${link}`);
 
-      // Lấy URL video từ TikTok
       const videoUrl = await getTikTokVideo(link);
       console.log(`Fetched TikTok video: ${videoUrl}`);
 
-      // Tạo file tạm để lưu video
       const filePath = path.join(__dirname, 'cache', `${Date.now()}.mp4`);
       const writer = fs.createWriteStream(filePath);
 
-      // Tải video về
       const response = await axios({
         method: 'GET',
         url: videoUrl,
         responseType: 'stream',
+        timeout: 30000, 
       });
       response.data.pipe(writer);
 
-      // Đợi cho việc tải xuống hoàn tất
       await new Promise((resolve, reject) => {
         writer.on('finish', resolve);
         writer.on('error', reject);
       });
 
-      // Upload video lên Catbox
       const catboxLink = await uploadToCatbox(filePath);
       console.log(`Uploaded to Catbox: ${catboxLink}`);
 
-      // Lưu kết quả vào mảng
-      result.push({ tiktok: link, catbox: catboxLink });
+      result.push(catboxLink);
 
-      // Xóa file tạm
       fs.unlinkSync(filePath);
     }
 
-    // Lưu kết quả vào file JSON
     fs.writeFileSync('result.json', JSON.stringify(result, null, 2), 'utf-8');
     console.log('All videos processed and saved to result.json');
   } catch (error) {
@@ -86,5 +81,4 @@ async function processTikTokLinks() {
   }
 }
 
-// Chạy hàm chính
 processTikTokLinks();
